@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Manna the Beaver - Auto Runner</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #1a0a00;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      font-family: 'Courier New', monospace;
+      color: #f5deb3;
+    }
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 12px;
+      color: #c8860a;
+      text-shadow: 0 0 12px #c8860a88;
+      letter-spacing: 2px;
+    }
+    #gameCanvas {
+      border: 3px solid #c8860a;
+      border-radius: 6px;
+      box-shadow: 0 0 30px #c8860a44;
+      display: block;
+    }
+    #ui {
+      margin-top: 12px;
+      display: flex;
+      gap: 40px;
+      font-size: 1.1rem;
+    }
+    #controls {
+      margin-top: 10px;
+      font-size: 0.85rem;
+      color: #a07040;
+    }
+  </style>
+</head>
+<body>
+  <h1>MANNA THE BEAVER</h1>
+  <canvas id="gameCanvas" width="800" height="320"></canvas>
+  <div id="ui">
+    <span>SCORE: <span id="score">0</span></span>
+    <span>BEST: <span id="best">0</span></span>
+    <span>SPEED: <span id="speed">1.0</span>x</span>
+  </div>
+  <div id="controls">SPACE / UP / TAP — jump &nbsp;|&nbsp; DOWN — duck</div>
+
+  <script>
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+
+  const GROUND_Y = H - 60;
+  const GRAVITY = 0.55;
+  const JUMP_V = -13;
+  const BASE_SPEED = 4;
+
+  // ── colours ──────────────────────────────────────────────────────────────────
+  const COL = {
+    sky1: '#87ceeb', sky2: '#d4f0ff',
+    ground1: '#5c3a1e', ground2: '#3b1f0a',
+    grass: '#2e7d32',
+    beaver: '#8B4513', beaverDark: '#5c2d09', beaverLight: '#cd853f',
+    tail: '#6b3410',
+    eye: '#1a0a00', eyeShine: '#fff',
+    tooth: '#fffde7',
+    log: '#795548', logDark: '#4e342e',
+    rock: '#78909c', rockDark: '#546e7a',
+    water: '#1976d2', waterLight: '#42a5f5',
+    cloud: '#ffffffcc',
+    score: '#c8860a',
+  };
+
+  // ── state ─────────────────────────────────────────────────────────────────
+  let state, manna, obstacles, clouds, particles, score, best, speedMult, frame;
+  let bgX = 0;
+
+  function init() {
+    state = 'idle'; // 'idle' | 'running' | 'dead'
+    score = 0;
+    speedMult = 1;
+    frame = 0;
+    bgX = 0;
+
+    manna = {
+      x: 130,
+      y: GROUND_Y,
+      vy: 0,
+      ducking: false,
+      onGround: true,
+      legPhase: 0,
+      tailWag: 0,
+    };
+    obstacles = [];
+    clouds = [
+      { x: 100, y: 50, w: 90, speed: 0.4 },
+      { x: 400, y: 70, w: 60, speed: 0.3 },
+      { x: 650, y: 40, w: 80, speed: 0.5 },
+    ];
+    particles = [];
+  }
+
+  // ── input ─────────────────────────────────────────────────────────────────
+  const keys = {};
+  document.addEventListener('keydown', e => {
+    keys[e.code] = true;
+    if ((e.code === 'Space' || e.code === 'ArrowUp') && !keys._jumpHeld) {
+      keys._jumpHeld = true;
+      handleJump();
+    }
+    if (e.code === 'Space') e.preventDefault();
+  });
+  document.addEventListener('keyup', e => {
+    keys[e.code] = false;
+    if (e.code === 'Space' || e.code === 'ArrowUp') keys._jumpHeld = false;
+  });
+  canvas.addEventListener('pointerdown', () => handleJump());
+
+  function handleJump() {
+    if (state === 'idle') { state = 'running'; return; }
+    if (state === 'dead') { init(); state = 'running'; return; }
+    if (manna.onGround) {
+      manna.vy = JUMP_V;
+      manna.onGround = false;
+      spawnParticles(manna.x + 10, GROUND_Y + 20, 6, '#8B4513');
+    }
+  }
+
+  // ── particles ─────────────────────────────────────────────────────────────
+  function spawnParticles(x, y, n, color) {
+    for (let i = 0; i < n; i++) {
+      particles.push({
+        x, y,
+        vx: (Math.random() - 0.5) * 4,
+        vy: -Math.random() * 3 - 1,
+        life: 1,
+        decay: 0.06 + Math.random() * 0.04,
+        r: 3 + Math.random() * 3,
+        color,
+      });
+    }
+  }
+
+  // ── obstacle spawning ──────────────────────────────────────────────────────
+  let nextObstacleIn = 80;
+
+  function maybeSpawnObstacle() {
+    nextObstacleIn--;
+    if (nextObstacleIn > 0) return;
+    nextObstacleIn = Math.floor(60 + Math.random() * 80) / speedMult;
+
+    const type = Math.random() < 0.5 ? 'log' : 'rock';
+    if (type === 'log') {
+      const h = 28 + Math.floor(Math.random() * 20);
+      obstacles.push({ type: 'log', x: W + 20, y: GROUND_Y + 20 - h, w: 22, h });
+    } else {
+      const s = 22 + Math.floor(Math.random() * 18);
+      obstacles.push({ type: 'rock', x: W + 20, y: GROUND_Y + 20 - s, w: s * 1.3, h: s });
+    }
+  }
+
+  // ── drawing helpers ────────────────────────────────────────────────────────
+  function drawSky() {
+    const grad = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
+    grad.addColorStop(0, '#5ba3d0');
+    grad.addColorStop(1, '#d4f1ff');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, GROUND_Y);
+  }
+
+  function drawGround() {
+    // ground body
+    const grad = ctx.createLinearGradient(0, GROUND_Y, 0, H);
+    grad.addColorStop(0, '#5c3a1e');
+    grad.addColorStop(1, '#2a0f00');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, GROUND_Y + 20, W, H - GROUND_Y - 20);
+
+    // grass strip
+    ctx.fillStyle = '#3a7d2e';
+    ctx.fillRect(0, GROUND_Y + 14, W, 10);
+    ctx.fillStyle = '#2e6626';
+    ctx.fillRect(0, GROUND_Y + 18, W, 4);
+
+    // scrolling ground detail dots
+    ctx.fillStyle = '#4a2a10';
+    for (let i = 0; i < 12; i++) {
+      const dx = ((i * 70 - bgX * 0.6) % (W + 40) + W + 40) % (W + 40) - 20;
+      ctx.beginPath();
+      ctx.ellipse(dx, GROUND_Y + 28, 8, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawCloud(c) {
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.beginPath();
+    ctx.ellipse(c.x, c.y, c.w / 2, 18, 0, 0, Math.PI * 2);
+    ctx.ellipse(c.x - c.w * 0.25, c.y + 6, c.w * 0.3, 14, 0, 0, Math.PI * 2);
+    ctx.ellipse(c.x + c.w * 0.25, c.y + 8, c.w * 0.3, 14, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawLog(o) {
+    // log body
+    ctx.fillStyle = COL.log;
+    ctx.beginPath();
+    ctx.roundRect(o.x, o.y, o.w, o.h, 4);
+    ctx.fill();
+    // grain lines
+    ctx.strokeStyle = COL.logDark;
+    ctx.lineWidth = 1;
+    for (let i = 1; i < 4; i++) {
+      const ly = o.y + (o.h / 4) * i;
+      ctx.beginPath();
+      ctx.moveTo(o.x + 3, ly);
+      ctx.lineTo(o.x + o.w - 3, ly);
+      ctx.stroke();
+    }
+    // end cap
+    ctx.fillStyle = COL.logDark;
+    ctx.beginPath();
+    ctx.ellipse(o.x + o.w / 2, o.y + o.h, o.w / 2 - 2, 6, 0, 0, Math.PI);
+    ctx.fill();
+  }
+
+  function drawRock(o) {
+    ctx.fillStyle = COL.rock;
+    ctx.beginPath();
+    ctx.ellipse(o.x + o.w / 2, o.y + o.h / 2, o.w / 2, o.h / 2, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = COL.rockDark;
+    ctx.beginPath();
+    ctx.ellipse(o.x + o.w / 2 + 4, o.y + o.h / 2 + 3, o.w * 0.3, o.h * 0.3, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    // highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.beginPath();
+    ctx.ellipse(o.x + o.w * 0.35, o.y + o.h * 0.3, o.w * 0.18, o.h * 0.18, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // ── beaver drawing ─────────────────────────────────────────────────────────
+  function drawBeaver(m) {
+    const x = m.x;
+    const y = m.y;
+    const duck = m.ducking;
+    const lp = m.legPhase;
+    const tw = m.tailWag;
+
+    ctx.save();
+
+    const bodyW = duck ? 44 : 32;
+    const bodyH = duck ? 22 : 30;
+    const bodyX = x - 8;
+    const bodyY = duck ? y - bodyH + 8 : y - bodyH;
+
+    // ── tail (flat beaver tail) ─────────────────────────────────────────
+    ctx.fillStyle = COL.tail;
+    if (duck) {
+      ctx.beginPath();
+      ctx.ellipse(bodyX - 12 + tw, bodyY + bodyH - 6, 18, 8, 0.2, 0, Math.PI * 2);
+      ctx.fill();
+      // tail texture hatching
+      ctx.strokeStyle = COL.beaverDark;
+      ctx.lineWidth = 0.8;
+      for (let i = 0; i < 4; i++) {
+        ctx.beginPath();
+        ctx.moveTo(bodyX - 22 + i * 4 + tw, bodyY + bodyH - 10);
+        ctx.lineTo(bodyX - 18 + i * 4 + tw, bodyY + bodyH - 2);
+        ctx.stroke();
+      }
+    } else {
+      ctx.beginPath();
+      ctx.ellipse(bodyX - 10 + tw * 2, bodyY + bodyH + 4, 8, 14, 0.3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = COL.beaverDark;
+      ctx.lineWidth = 0.8;
+      for (let i = 0; i < 4; i++) {
+        ctx.beginPath();
+        ctx.moveTo(bodyX - 14 + i * 3 + tw * 2, bodyY + bodyH);
+        ctx.lineTo(bodyX - 16 + i * 3 + tw * 2, bodyY + bodyH + 10);
+        ctx.stroke();
+      }
+    }
+
+    // ── legs ─────────────────────────────────────────────────────────────
+    if (!duck) {
+      ctx.fillStyle = COL.beaverDark;
+      const l1 = Math.sin(lp) * 5;
+      const l2 = Math.sin(lp + Math.PI) * 5;
+      // back leg
+      ctx.beginPath();
+      ctx.roundRect(bodyX + 4, bodyY + bodyH + l2, 9, 10, 4);
+      ctx.fill();
+      // front leg
+      ctx.beginPath();
+      ctx.roundRect(bodyX + bodyW - 13, bodyY + bodyH + l1, 9, 10, 4);
+      ctx.fill();
+    }
+
+    // ── body ─────────────────────────────────────────────────────────────
+    ctx.fillStyle = COL.beaver;
+    ctx.beginPath();
+    ctx.roundRect(bodyX, bodyY, bodyW, bodyH, duck ? 10 : 14);
+    ctx.fill();
+
+    // belly highlight
+    ctx.fillStyle = COL.beaverLight;
+    ctx.beginPath();
+    ctx.ellipse(bodyX + bodyW * 0.55, bodyY + bodyH * 0.55, bodyW * 0.25, bodyH * 0.28, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ── arms ─────────────────────────────────────────────────────────────
+    if (!duck) {
+      ctx.fillStyle = COL.beaverDark;
+      ctx.beginPath();
+      ctx.roundRect(bodyX + bodyW - 6, bodyY + 10, 8, 6, 3);
+      ctx.fill();
+    }
+
+    // ── head ─────────────────────────────────────────────────────────────
+    const headR = duck ? 14 : 15;
+    const headX = duck ? bodyX + bodyW - 6 : bodyX + bodyW + 2;
+    const headY = duck ? bodyY + 4 : bodyY - 8;
+
+    ctx.fillStyle = COL.beaver;
+    ctx.beginPath();
+    ctx.arc(headX, headY, headR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // cheek pouches
+    ctx.fillStyle = COL.beaverLight;
+    ctx.beginPath();
+    ctx.ellipse(headX + 6, headY + 4, 7, 6, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ── ears ─────────────────────────────────────────────────────────────
+    ctx.fillStyle = COL.beaverDark;
+    ctx.beginPath();
+    ctx.ellipse(headX - 7, headY - headR + 4, 5, 7, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = COL.beaverLight;
+    ctx.beginPath();
+    ctx.ellipse(headX - 7, headY - headR + 4, 3, 5, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = COL.beaverDark;
+    ctx.beginPath();
+    ctx.ellipse(headX + 5, headY - headR + 2, 5, 7, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = COL.beaverLight;
+    ctx.beginPath();
+    ctx.ellipse(headX + 5, headY - headR + 2, 3, 5, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ── eye ──────────────────────────────────────────────────────────────
+    ctx.fillStyle = COL.eye;
+    ctx.beginPath();
+    ctx.arc(headX + 5, headY - 2, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = COL.eyeShine;
+    ctx.beginPath();
+    ctx.arc(headX + 6.5, headY - 3, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ── nose ─────────────────────────────────────────────────────────────
+    ctx.fillStyle = '#2a0a00';
+    ctx.beginPath();
+    ctx.ellipse(headX + 11, headY + 3, 4, 3, 0.1, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ── buck teeth ───────────────────────────────────────────────────────
+    ctx.fillStyle = COL.tooth;
+    ctx.beginPath();
+    ctx.roundRect(headX + 7, headY + 6, 5, 6, [0, 0, 2, 2]);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.roundRect(headX + 13, headY + 6, 5, 6, [0, 0, 2, 2]);
+    ctx.fill();
+    ctx.strokeStyle = '#ccc';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(headX + 12, headY + 6);
+    ctx.lineTo(headX + 12, headY + 12);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // ── collision ─────────────────────────────────────────────────────────────
+  function hitboxOf(m) {
+    const duck = m.ducking;
+    const w = duck ? 44 : 36;
+    const h = duck ? 22 : 38;
+    return { x: m.x - 4, y: m.y - h + 4, w: w - 8, h: h - 6 };
+  }
+
+  function overlaps(a, b) {
+    return a.x < b.x + b.w && a.x + a.w > b.x &&
+           a.y < b.y + b.h && a.y + a.h > b.y;
+  }
+
+  // ── overlay screens ───────────────────────────────────────────────────────
+  function drawOverlay(msg, sub) {
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = '#f5deb3';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 36px Courier New';
+    ctx.fillText(msg, W / 2, H / 2 - 16);
+
+    ctx.font = '16px Courier New';
+    ctx.fillStyle = '#c8860a';
+    ctx.fillText(sub, W / 2, H / 2 + 16);
+    ctx.textAlign = 'left';
+  }
+
+  // ── main loop ─────────────────────────────────────────────────────────────
+  function update() {
+    if (state !== 'running') return;
+
+    frame++;
+    score++;
+    speedMult = 1 + Math.floor(score / 600) * 0.15;
+    const spd = BASE_SPEED * speedMult;
+
+    // move background
+    bgX += spd;
+
+    // clouds
+    clouds.forEach(c => {
+      c.x -= c.speed * speedMult;
+      if (c.x + c.w < 0) c.x = W + c.w;
+    });
+
+    // manna physics
+    manna.ducking = !!(keys['ArrowDown'] || keys['KeyS']);
+    if (!manna.onGround) {
+      manna.vy += GRAVITY;
+      manna.y += manna.vy;
+    }
+    if (manna.y >= GROUND_Y) {
+      manna.y = GROUND_Y;
+      manna.vy = 0;
+      manna.onGround = true;
+    }
+
+    // animation
+    if (manna.onGround && !manna.ducking) {
+      manna.legPhase += 0.22 * speedMult;
+    }
+    manna.tailWag = Math.sin(frame * 0.12) * 3;
+
+    // spawn obstacles
+    maybeSpawnObstacle();
+
+    // update obstacles
+    for (let i = obstacles.length - 1; i >= 0; i--) {
+      const o = obstacles[i];
+      o.x -= spd;
+      if (o.x + o.w < -20) { obstacles.splice(i, 1); continue; }
+
+      // collision
+      const mb = hitboxOf(manna);
+      if (overlaps(mb, o)) {
+        state = 'dead';
+        if (score > best) best = score;
+        spawnParticles(manna.x + 20, manna.y - 10, 16, COL.beaver);
+        document.getElementById('best').textContent = Math.floor(best / 6);
+      }
+    }
+
+    // particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx; p.y += p.vy; p.vy += 0.15;
+      p.life -= p.decay;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+
+    // update UI
+    document.getElementById('score').textContent = Math.floor(score / 6);
+    document.getElementById('speed').textContent = speedMult.toFixed(1);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    drawSky();
+    clouds.forEach(drawCloud);
+    drawGround();
+
+    // distance markers
+    ctx.fillStyle = 'rgba(100,60,20,0.5)';
+    ctx.font = '11px Courier New';
+    const dist = Math.floor(score / 6);
+    if (dist > 0 && dist % 50 === 0 && frame % 60 < 30) {
+      ctx.fillText(`${dist}m`, W / 2, 30);
+    }
+
+    // obstacles
+    obstacles.forEach(o => {
+      if (o.type === 'log') drawLog(o);
+      else drawRock(o);
+    });
+
+    // particles
+    particles.forEach(p => {
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // manna
+    drawBeaver(manna);
+
+    if (state === 'idle') {
+      drawOverlay('MANNA THE BEAVER', 'Press SPACE or tap to start!');
+    } else if (state === 'dead') {
+      drawOverlay('SPLAT!', `Score: ${Math.floor(score/6)}m  —  Press SPACE to retry`);
+    }
+  }
+
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  init();
+  loop();
+  </script>
+</body>
+</html>
