@@ -7,121 +7,145 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      background: #1a0a00;
+      background: #0d0500;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      height: 100vh;
+      min-height: 100vh;
       font-family: 'Courier New', monospace;
       color: #f5deb3;
     }
     h1 {
       font-size: 2rem;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
       color: #c8860a;
-      text-shadow: 0 0 12px #c8860a88;
-      letter-spacing: 2px;
+      text-shadow: 0 0 18px #c8860a99;
+      letter-spacing: 3px;
     }
     #gameCanvas {
       border: 3px solid #c8860a;
       border-radius: 6px;
-      box-shadow: 0 0 30px #c8860a44;
+      box-shadow: 0 0 40px #c8860a55;
       display: block;
+      max-width: 100%;
     }
     #ui {
-      margin-top: 12px;
+      margin-top: 10px;
       display: flex;
-      gap: 40px;
-      font-size: 1.1rem;
+      gap: 36px;
+      font-size: 1.05rem;
     }
     #controls {
-      margin-top: 10px;
-      font-size: 0.85rem;
+      margin-top: 8px;
+      font-size: 0.82rem;
       color: #a07040;
     }
   </style>
 </head>
 <body>
   <h1>MANNA THE BEAVER</h1>
-  <canvas id="gameCanvas" width="800" height="320"></canvas>
+  <canvas id="gameCanvas" width="900" height="360"></canvas>
   <div id="ui">
-    <span>SCORE: <span id="score">0</span></span>
-    <span>BEST: <span id="best">0</span></span>
+    <span>SCORE: <span id="score">0</span>m</span>
+    <span>BEST: <span id="best">0</span>m</span>
     <span>SPEED: <span id="speed">1.0</span>x</span>
   </div>
-  <div id="controls">SPACE / UP / TAP — jump &nbsp;|&nbsp; DOWN — duck</div>
+  <div id="controls">SPACE / UP / TAP — jump</div>
 
   <script>
   const canvas = document.getElementById('gameCanvas');
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
 
-  const GROUND_Y = H - 60;
-  const GRAVITY = 0.55;
-  const JUMP_V = -13;
-  const BASE_SPEED = 4;
+  const GROUND_Y = H - 70;
+  const GRAVITY = 0.6;
+  const JUMP_V = -14.5;
+  const BASE_SPEED = 5.5; // slightly faster
 
-  // ── colours ──────────────────────────────────────────────────────────────────
-  const COL = {
-    sky1: '#87ceeb', sky2: '#d4f0ff',
-    ground1: '#5c3a1e', ground2: '#3b1f0a',
-    grass: '#2e7d32',
-    beaver: '#8B4513', beaverDark: '#5c2d09', beaverLight: '#cd853f',
-    tail: '#6b3410',
-    eye: '#1a0a00', eyeShine: '#fff',
-    tooth: '#fffde7',
-    log: '#795548', logDark: '#4e342e',
-    rock: '#78909c', rockDark: '#546e7a',
-    water: '#1976d2', waterLight: '#42a5f5',
-    cloud: '#ffffffcc',
-    score: '#c8860a',
+  // ── palette ───────────────────────────────────────────────────────────────
+  const C = {
+    beaver:      '#8B4513',
+    beaverDark:  '#5c2d09',
+    beaverLight: '#cd853f',
+    beaverHL:    '#e8a060',
+    tail:        '#6b3410',
+    tailTex:     '#3e1c06',
+    eye:         '#0a0500',
+    eyeShine:    '#ffffff',
+    tooth:       '#fffde7',
+    toothLine:   '#d4c84a',
+    ear:         '#7a3810',
+    earInner:    '#c06030',
+    log:         '#795548',
+    logDark:     '#4e342e',
+    logLight:    '#a1887f',
+    rock:        '#78909c',
+    rockDark:    '#455a64',
+    rockLight:   '#b0bec5',
+    tree:        '#2e7d32',
+    treeTrunk:   '#5d4037',
+    mtn1:        '#607d8b',
+    mtn2:        '#455a64',
+    mtn3:        '#37474f',
+    cloud:       'rgba(255,255,255,0.82)',
+    ground:      '#5c3a1e',
+    groundDark:  '#2a0f00',
+    grass1:      '#388e3c',
+    grass2:      '#2e7d32',
+    water:       '#1565c0',
+    waterLight:  '#42a5f5',
   };
 
   // ── state ─────────────────────────────────────────────────────────────────
-  let state, manna, obstacles, clouds, particles, score, best, speedMult, frame;
-  let bgX = 0;
+  let state, manna, obstacles, clouds, trees, particles, score, best, speedMult, frame;
+  let bgX = 0, mtX = 0, cloudX = 0;
 
   function init() {
-    state = 'idle'; // 'idle' | 'running' | 'dead'
-    score = 0;
+    state     = 'idle';
+    score     = 0;
     speedMult = 1;
-    frame = 0;
-    bgX = 0;
-
+    frame     = 0;
+    bgX = mtX = cloudX = 0;
     manna = {
-      x: 130,
-      y: GROUND_Y,
+      x: 140, y: GROUND_Y,
       vy: 0,
-      ducking: false,
       onGround: true,
       legPhase: 0,
-      tailWag: 0,
+      tailWag:  0,
+      bobble:   0,
+      squash:   1,   // for jump squash/stretch
     };
     obstacles = [];
     clouds = [
-      { x: 100, y: 50, w: 90, speed: 0.4 },
-      { x: 400, y: 70, w: 60, speed: 0.3 },
-      { x: 650, y: 40, w: 80, speed: 0.5 },
+      { x: 120,  y: 55,  w: 110, speed: 0.35 },
+      { x: 380,  y: 80,  w: 75,  speed: 0.25 },
+      { x: 680,  y: 40,  w: 95,  speed: 0.45 },
+      { x: 820,  y: 65,  w: 60,  speed: 0.3  },
+    ];
+    trees = [
+      { x: 200, h: 70 }, { x: 420, h: 55 }, { x: 600, h: 80 },
+      { x: 750, h: 60 }, { x: 900, h: 75 },
     ];
     particles = [];
+    nextObstacleIn = 90;
   }
 
   // ── input ─────────────────────────────────────────────────────────────────
   const keys = {};
   document.addEventListener('keydown', e => {
     keys[e.code] = true;
-    if ((e.code === 'Space' || e.code === 'ArrowUp') && !keys._jumpHeld) {
-      keys._jumpHeld = true;
+    if ((e.code === 'Space' || e.code === 'ArrowUp') && !keys._held) {
+      keys._held = true;
       handleJump();
     }
     if (e.code === 'Space') e.preventDefault();
   });
   document.addEventListener('keyup', e => {
     keys[e.code] = false;
-    if (e.code === 'Space' || e.code === 'ArrowUp') keys._jumpHeld = false;
+    if (e.code === 'Space' || e.code === 'ArrowUp') keys._held = false;
   });
-  canvas.addEventListener('pointerdown', () => handleJump());
+  canvas.addEventListener('pointerdown', e => { e.preventDefault(); handleJump(); });
 
   function handleJump() {
     if (state === 'idle') { state = 'running'; return; }
@@ -129,278 +153,495 @@
     if (manna.onGround) {
       manna.vy = JUMP_V;
       manna.onGround = false;
-      spawnParticles(manna.x + 10, GROUND_Y + 20, 6, '#8B4513');
+      manna.squash = 0.6;
+      spawnDust(manna.x + 18, GROUND_Y + 18, 8);
     }
   }
 
   // ── particles ─────────────────────────────────────────────────────────────
-  function spawnParticles(x, y, n, color) {
+  function spawnDust(x, y, n) {
     for (let i = 0; i < n; i++) {
       particles.push({
         x, y,
-        vx: (Math.random() - 0.5) * 4,
-        vy: -Math.random() * 3 - 1,
-        life: 1,
-        decay: 0.06 + Math.random() * 0.04,
-        r: 3 + Math.random() * 3,
-        color,
+        vx: (Math.random() - 0.5) * 5,
+        vy: -Math.random() * 3.5 - 0.5,
+        life: 1, decay: 0.055 + Math.random() * 0.04,
+        r: 2 + Math.random() * 4,
+        color: ['#8B4513','#cd853f','#a0522d'][Math.floor(Math.random()*3)],
+      });
+    }
+  }
+
+  function spawnExplosion(x, y) {
+    for (let i = 0; i < 22; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const spd = 2 + Math.random() * 5;
+      particles.push({
+        x, y,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd - 2,
+        life: 1, decay: 0.035 + Math.random() * 0.03,
+        r: 3 + Math.random() * 5,
+        color: [C.beaver, C.beaverLight, C.beaverDark, C.tail, '#fff'][Math.floor(Math.random()*5)],
       });
     }
   }
 
   // ── obstacle spawning ──────────────────────────────────────────────────────
-  let nextObstacleIn = 80;
+  let nextObstacleIn = 90;
 
   function maybeSpawnObstacle() {
     nextObstacleIn--;
     if (nextObstacleIn > 0) return;
-    nextObstacleIn = Math.floor(60 + Math.random() * 80) / speedMult;
+    nextObstacleIn = Math.floor(55 + Math.random() * 75) / speedMult;
 
-    const type = Math.random() < 0.5 ? 'log' : 'rock';
-    if (type === 'log') {
-      const h = 28 + Math.floor(Math.random() * 20);
-      obstacles.push({ type: 'log', x: W + 20, y: GROUND_Y + 20 - h, w: 22, h });
+    const roll = Math.random();
+    if (roll < 0.4) {
+      // tall log
+      const h = 32 + Math.floor(Math.random() * 22);
+      obstacles.push({ type: 'log', x: W + 30, y: GROUND_Y + 18 - h, w: 24, h });
+    } else if (roll < 0.75) {
+      // rock
+      const s = 24 + Math.floor(Math.random() * 20);
+      obstacles.push({ type: 'rock', x: W + 30, y: GROUND_Y + 18 - s, w: s * 1.4, h: s });
     } else {
-      const s = 22 + Math.floor(Math.random() * 18);
-      obstacles.push({ type: 'rock', x: W + 20, y: GROUND_Y + 20 - s, w: s * 1.3, h: s });
+      // double log cluster
+      const h1 = 28 + Math.floor(Math.random() * 14);
+      const h2 = 22 + Math.floor(Math.random() * 14);
+      obstacles.push({ type: 'log', x: W + 30, y: GROUND_Y + 18 - h1, w: 22, h: h1 });
+      obstacles.push({ type: 'log', x: W + 62, y: GROUND_Y + 18 - h2, w: 22, h: h2 });
     }
   }
 
-  // ── drawing helpers ────────────────────────────────────────────────────────
+  // ── background drawing ─────────────────────────────────────────────────────
   function drawSky() {
-    const grad = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
-    grad.addColorStop(0, '#5ba3d0');
-    grad.addColorStop(1, '#d4f1ff');
-    ctx.fillStyle = grad;
+    const g = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
+    g.addColorStop(0,   '#2c5f8a');
+    g.addColorStop(0.5, '#5ba3d0');
+    g.addColorStop(1,   '#c8e8f5');
+    ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, GROUND_Y);
   }
 
-  function drawGround() {
-    // ground body
-    const grad = ctx.createLinearGradient(0, GROUND_Y, 0, H);
-    grad.addColorStop(0, '#5c3a1e');
-    grad.addColorStop(1, '#2a0f00');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, GROUND_Y + 20, W, H - GROUND_Y - 20);
-
-    // grass strip
-    ctx.fillStyle = '#3a7d2e';
-    ctx.fillRect(0, GROUND_Y + 14, W, 10);
-    ctx.fillStyle = '#2e6626';
-    ctx.fillRect(0, GROUND_Y + 18, W, 4);
-
-    // scrolling ground detail dots
-    ctx.fillStyle = '#4a2a10';
-    for (let i = 0; i < 12; i++) {
-      const dx = ((i * 70 - bgX * 0.6) % (W + 40) + W + 40) % (W + 40) - 20;
+  function drawMountains() {
+    // distant mountains — three layers
+    const layers = [
+      { col: C.mtn3, peaks: [[0,160],[120,80],[260,120],[400,60],[540,100],[700,70],[900,90],[900,160]], off: 0.1 },
+      { col: C.mtn2, peaks: [[0,170],[80,100],[200,130],[350,80],[500,110],[650,90],[800,120],[900,170]], off: 0.2 },
+      { col: C.mtn1, peaks: [[0,180],[60,120],[160,150],[300,100],[450,130],[600,105],[780,140],[900,180]], off: 0.3 },
+    ];
+    layers.forEach(l => {
+      ctx.fillStyle = l.col;
       ctx.beginPath();
-      ctx.ellipse(dx, GROUND_Y + 28, 8, 4, 0, 0, Math.PI * 2);
+      const shift = (mtX * l.off) % 900;
+      ctx.moveTo(0, GROUND_Y);
+      l.peaks.forEach(([px, py]) => ctx.lineTo((px - shift + 1800) % 900, py));
+      ctx.lineTo(W, GROUND_Y);
+      ctx.closePath();
+      ctx.fill();
+    });
+  }
+
+  function drawTree(tx, th) {
+    // trunk
+    ctx.fillStyle = C.treeTrunk;
+    ctx.fillRect(tx - 5, GROUND_Y + 18 - th * 0.45, 10, th * 0.45);
+    // canopy layers
+    ctx.fillStyle = C.tree;
+    ctx.beginPath();
+    ctx.moveTo(tx, GROUND_Y + 18 - th);
+    ctx.lineTo(tx + 28, GROUND_Y + 18 - th * 0.5);
+    ctx.lineTo(tx - 28, GROUND_Y + 18 - th * 0.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(tx, GROUND_Y + 18 - th * 0.75);
+    ctx.lineTo(tx + 22, GROUND_Y + 18 - th * 0.3);
+    ctx.lineTo(tx - 22, GROUND_Y + 18 - th * 0.3);
+    ctx.closePath();
+    ctx.fill();
+    // highlight
+    ctx.fillStyle = '#43a047';
+    ctx.beginPath();
+    ctx.moveTo(tx - 6, GROUND_Y + 18 - th);
+    ctx.lineTo(tx + 10, GROUND_Y + 18 - th * 0.55);
+    ctx.lineTo(tx - 10, GROUND_Y + 18 - th * 0.55);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function drawGround() {
+    // main soil
+    const g = ctx.createLinearGradient(0, GROUND_Y + 18, 0, H);
+    g.addColorStop(0, '#6b4423');
+    g.addColorStop(1, '#2a0f00');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, GROUND_Y + 18, W, H - GROUND_Y - 18);
+
+    // grass top
+    ctx.fillStyle = C.grass1;
+    ctx.fillRect(0, GROUND_Y + 12, W, 10);
+    ctx.fillStyle = C.grass2;
+    ctx.fillRect(0, GROUND_Y + 16, W, 5);
+
+    // grass tufts
+    ctx.fillStyle = '#2e7d32';
+    for (let i = 0; i < 18; i++) {
+      const dx = ((i * 52 - bgX * 0.5) % (W + 60) + W + 60) % (W + 60) - 30;
+      ctx.beginPath();
+      ctx.moveTo(dx - 5, GROUND_Y + 12);
+      ctx.lineTo(dx,     GROUND_Y + 3);
+      ctx.lineTo(dx + 3, GROUND_Y + 9);
+      ctx.lineTo(dx + 7, GROUND_Y + 1);
+      ctx.lineTo(dx + 11,GROUND_Y + 11);
+      ctx.lineTo(dx + 16,GROUND_Y + 12);
+      ctx.fill();
+    }
+
+    // pebbles
+    ctx.fillStyle = '#4a2a10';
+    for (let i = 0; i < 14; i++) {
+      const dx = ((i * 65 - bgX * 0.55) % (W + 80) + W + 80) % (W + 80) - 40;
+      ctx.beginPath();
+      ctx.ellipse(dx, GROUND_Y + 30, 7, 4, 0.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // water puddles
+    for (let i = 0; i < 3; i++) {
+      const dx = ((i * 310 - bgX * 0.52) % (W + 100) + W + 100) % (W + 100) - 50;
+      ctx.fillStyle = C.water;
+      ctx.beginPath();
+      ctx.ellipse(dx, GROUND_Y + 38, 28, 7, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = C.waterLight;
+      ctx.beginPath();
+      ctx.ellipse(dx - 6, GROUND_Y + 35, 10, 3, -0.3, 0, Math.PI * 2);
       ctx.fill();
     }
   }
 
   function drawCloud(c) {
-    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.fillStyle = C.cloud;
     ctx.beginPath();
-    ctx.ellipse(c.x, c.y, c.w / 2, 18, 0, 0, Math.PI * 2);
-    ctx.ellipse(c.x - c.w * 0.25, c.y + 6, c.w * 0.3, 14, 0, 0, Math.PI * 2);
-    ctx.ellipse(c.x + c.w * 0.25, c.y + 8, c.w * 0.3, 14, 0, 0, Math.PI * 2);
+    ctx.ellipse(c.x, c.y, c.w * 0.5, 20, 0, 0, Math.PI * 2);
+    ctx.ellipse(c.x - c.w * 0.28, c.y + 7, c.w * 0.32, 15, 0, 0, Math.PI * 2);
+    ctx.ellipse(c.x + c.w * 0.28, c.y + 9, c.w * 0.32, 15, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // inner highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.beginPath();
+    ctx.ellipse(c.x - 5, c.y - 4, c.w * 0.25, 8, -0.2, 0, Math.PI * 2);
     ctx.fill();
   }
 
+  // ── obstacle drawing ────────────────────────────────────────────────────
   function drawLog(o) {
-    // log body
-    ctx.fillStyle = COL.log;
+    // shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
     ctx.beginPath();
-    ctx.roundRect(o.x, o.y, o.w, o.h, 4);
+    ctx.ellipse(o.x + o.w / 2, GROUND_Y + 24, o.w * 0.6, 6, 0, 0, Math.PI * 2);
     ctx.fill();
-    // grain lines
-    ctx.strokeStyle = COL.logDark;
+    // body
+    const g = ctx.createLinearGradient(o.x, 0, o.x + o.w, 0);
+    g.addColorStop(0, C.logDark);
+    g.addColorStop(0.35, C.log);
+    g.addColorStop(0.65, C.logLight);
+    g.addColorStop(1, C.logDark);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.roundRect(o.x, o.y, o.w, o.h, 5);
+    ctx.fill();
+    // grain rings
+    ctx.strokeStyle = C.logDark;
     ctx.lineWidth = 1;
-    for (let i = 1; i < 4; i++) {
-      const ly = o.y + (o.h / 4) * i;
+    for (let i = 1; i < 5; i++) {
+      const ly = o.y + (o.h / 5) * i;
       ctx.beginPath();
       ctx.moveTo(o.x + 3, ly);
       ctx.lineTo(o.x + o.w - 3, ly);
       ctx.stroke();
     }
-    // end cap
-    ctx.fillStyle = COL.logDark;
+    // end cap ellipse
+    ctx.fillStyle = C.logDark;
     ctx.beginPath();
-    ctx.ellipse(o.x + o.w / 2, o.y + o.h, o.w / 2 - 2, 6, 0, 0, Math.PI);
+    ctx.ellipse(o.x + o.w / 2, o.y + o.h, o.w / 2 - 2, 7, 0, 0, Math.PI);
     ctx.fill();
+    // end cap rings
+    ctx.strokeStyle = '#3e2010';
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.ellipse(o.x + o.w / 2, o.y + o.h, o.w * 0.28, 4, 0, 0, Math.PI);
+    ctx.stroke();
+    // bark texture nubs
+    ctx.fillStyle = '#5a3520';
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.ellipse(o.x + 4 + i * (o.w / 3), o.y + o.h * 0.4, 3, 2, 0.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   function drawRock(o) {
-    ctx.fillStyle = COL.rock;
+    // shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
     ctx.beginPath();
-    ctx.ellipse(o.x + o.w / 2, o.y + o.h / 2, o.w / 2, o.h / 2, -0.2, 0, Math.PI * 2);
+    ctx.ellipse(o.x + o.w / 2, GROUND_Y + 24, o.w * 0.55, 7, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = COL.rockDark;
+    // body gradient
+    const g = ctx.createRadialGradient(
+      o.x + o.w * 0.38, o.y + o.h * 0.35, 2,
+      o.x + o.w / 2,    o.y + o.h / 2,    o.w * 0.55
+    );
+    g.addColorStop(0, C.rockLight);
+    g.addColorStop(0.5, C.rock);
+    g.addColorStop(1, C.rockDark);
+    ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.ellipse(o.x + o.w / 2 + 4, o.y + o.h / 2 + 3, o.w * 0.3, o.h * 0.3, 0.3, 0, Math.PI * 2);
+    ctx.ellipse(o.x + o.w / 2, o.y + o.h * 0.52, o.w / 2, o.h / 2, -0.15, 0, Math.PI * 2);
     ctx.fill();
-    // highlight
-    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    // crack lines
+    ctx.strokeStyle = C.rockDark;
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.ellipse(o.x + o.w * 0.35, o.y + o.h * 0.3, o.w * 0.18, o.h * 0.18, -0.3, 0, Math.PI * 2);
+    ctx.moveTo(o.x + o.w * 0.5, o.y + o.h * 0.2);
+    ctx.lineTo(o.x + o.w * 0.65, o.y + o.h * 0.55);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(o.x + o.w * 0.35, o.y + o.h * 0.4);
+    ctx.lineTo(o.x + o.w * 0.25, o.y + o.h * 0.7);
+    ctx.stroke();
+    // specular highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    ctx.beginPath();
+    ctx.ellipse(o.x + o.w * 0.33, o.y + o.h * 0.28, o.w * 0.17, o.h * 0.16, -0.4, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  // ── beaver drawing ─────────────────────────────────────────────────────────
+  // ── CUBE BEAVER drawing ────────────────────────────────────────────────────
   function drawBeaver(m) {
     const x = m.x;
     const y = m.y;
-    const duck = m.ducking;
     const lp = m.legPhase;
     const tw = m.tailWag;
+    const sq = m.squash; // squash/stretch: <1 = squashed, >1 = stretched
 
     ctx.save();
 
-    const bodyW = duck ? 44 : 32;
-    const bodyH = duck ? 22 : 30;
-    const bodyX = x - 8;
-    const bodyY = duck ? y - bodyH + 8 : y - bodyH;
+    const S = 38; // cube side length
+    const bx = x - S / 2;
+    const by = y - Math.round(S * sq);   // stretch height
+    const bh = Math.round(S * sq);
+    const bw = Math.round(S / sq);       // compensate width so volume looks constant
 
-    // ── tail (flat beaver tail) ─────────────────────────────────────────
-    ctx.fillStyle = COL.tail;
-    if (duck) {
-      ctx.beginPath();
-      ctx.ellipse(bodyX - 12 + tw, bodyY + bodyH - 6, 18, 8, 0.2, 0, Math.PI * 2);
-      ctx.fill();
-      // tail texture hatching
-      ctx.strokeStyle = COL.beaverDark;
-      ctx.lineWidth = 0.8;
-      for (let i = 0; i < 4; i++) {
+    // ── shadow ────────────────────────────────────────────────────────────
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    ctx.beginPath();
+    ctx.ellipse(x + 4, GROUND_Y + 22, bw * 0.55, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ── flat paddle tail (behind body) ────────────────────────────────────
+    ctx.save();
+    ctx.translate(bx - 2, by + bh * 0.7);
+    ctx.rotate(0.18 + Math.sin(frame * 0.1) * 0.12);
+    // tail shape — wide flat ellipse
+    const tg = ctx.createLinearGradient(-24, 0, 8, 0);
+    tg.addColorStop(0, C.tailTex);
+    tg.addColorStop(0.5, C.tail);
+    tg.addColorStop(1, C.beaverDark);
+    ctx.fillStyle = tg;
+    ctx.beginPath();
+    ctx.ellipse(-14, 0, 22, 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // scale texture
+    ctx.strokeStyle = C.tailTex;
+    ctx.lineWidth = 0.7;
+    for (let r = 0; r < 3; r++) {
+      for (let c2 = 0; c2 < 5; c2++) {
         ctx.beginPath();
-        ctx.moveTo(bodyX - 22 + i * 4 + tw, bodyY + bodyH - 10);
-        ctx.lineTo(bodyX - 18 + i * 4 + tw, bodyY + bodyH - 2);
+        ctx.arc(-26 + c2 * 5 + (r%2)*2.5, -3 + r * 5, 2.5, 0, Math.PI * 2);
         ctx.stroke();
       }
-    } else {
+    }
+    ctx.restore();
+
+    // ── legs (two stubby squares bouncing) ───────────────────────────────
+    const l1 = manna.onGround ? Math.abs(Math.sin(lp)) * 7 : 0;
+    const l2 = manna.onGround ? Math.abs(Math.sin(lp + Math.PI)) * 7 : 0;
+
+    // back leg
+    ctx.fillStyle = C.beaverDark;
+    ctx.beginPath();
+    ctx.roundRect(bx + 4, y - 4 + l2, 11, 10, 3);
+    ctx.fill();
+    // front leg
+    ctx.beginPath();
+    ctx.roundRect(bx + bw - 16, y - 4 + l1, 11, 10, 3);
+    ctx.fill();
+    // foot pads
+    ctx.fillStyle = '#2a0a00';
+    ctx.beginPath();
+    ctx.ellipse(bx + 9,           y + 6 + l2, 5, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(bx + bw - 11, y + 6 + l1, 5, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ── body cube ────────────────────────────────────────────────────────
+    // main face
+    const bg = ctx.createLinearGradient(bx, by, bx + bw, by + bh);
+    bg.addColorStop(0,   C.beaverHL);
+    bg.addColorStop(0.4, C.beaver);
+    bg.addColorStop(1,   C.beaverDark);
+    ctx.fillStyle = bg;
+    ctx.beginPath();
+    ctx.roundRect(bx, by, bw, bh, 6);
+    ctx.fill();
+
+    // top face (3-D top)
+    ctx.fillStyle = C.beaverHL;
+    ctx.beginPath();
+    ctx.moveTo(bx,      by);
+    ctx.lineTo(bx + bw, by);
+    ctx.lineTo(bx + bw + 7, by - 7);
+    ctx.lineTo(bx + 7,  by - 7);
+    ctx.closePath();
+    ctx.fill();
+
+    // right face (3-D side)
+    const sg = ctx.createLinearGradient(bx + bw, by, bx + bw + 7, by - 7);
+    sg.addColorStop(0, C.beaverDark);
+    sg.addColorStop(1, '#3a1505');
+    ctx.fillStyle = sg;
+    ctx.beginPath();
+    ctx.moveTo(bx + bw,     by);
+    ctx.lineTo(bx + bw + 7, by - 7);
+    ctx.lineTo(bx + bw + 7, by + bh - 7);
+    ctx.lineTo(bx + bw,     by + bh);
+    ctx.closePath();
+    ctx.fill();
+
+    // belly patch
+    ctx.fillStyle = C.beaverLight;
+    ctx.beginPath();
+    ctx.roundRect(bx + bw * 0.3, by + bh * 0.35, bw * 0.4, bh * 0.45, 5);
+    ctx.fill();
+
+    // fur texture lines
+    ctx.strokeStyle = 'rgba(60,20,5,0.25)';
+    ctx.lineWidth = 0.8;
+    for (let i = 0; i < 5; i++) {
       ctx.beginPath();
-      ctx.ellipse(bodyX - 10 + tw * 2, bodyY + bodyH + 4, 8, 14, 0.3, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = COL.beaverDark;
-      ctx.lineWidth = 0.8;
-      for (let i = 0; i < 4; i++) {
-        ctx.beginPath();
-        ctx.moveTo(bodyX - 14 + i * 3 + tw * 2, bodyY + bodyH);
-        ctx.lineTo(bodyX - 16 + i * 3 + tw * 2, bodyY + bodyH + 10);
-        ctx.stroke();
-      }
+      ctx.moveTo(bx + 4,      by + bh * 0.15 + i * (bh * 0.14));
+      ctx.lineTo(bx + bw - 4, by + bh * 0.15 + i * (bh * 0.14));
+      ctx.stroke();
     }
 
-    // ── legs ─────────────────────────────────────────────────────────────
-    if (!duck) {
-      ctx.fillStyle = COL.beaverDark;
-      const l1 = Math.sin(lp) * 5;
-      const l2 = Math.sin(lp + Math.PI) * 5;
-      // back leg
-      ctx.beginPath();
-      ctx.roundRect(bodyX + 4, bodyY + bodyH + l2, 9, 10, 4);
-      ctx.fill();
-      // front leg
-      ctx.beginPath();
-      ctx.roundRect(bodyX + bodyW - 13, bodyY + bodyH + l1, 9, 10, 4);
-      ctx.fill();
-    }
-
-    // ── body ─────────────────────────────────────────────────────────────
-    ctx.fillStyle = COL.beaver;
+    // ── arm nubs ─────────────────────────────────────────────────────────
+    ctx.fillStyle = C.beaverDark;
     ctx.beginPath();
-    ctx.roundRect(bodyX, bodyY, bodyW, bodyH, duck ? 10 : 14);
+    ctx.roundRect(bx + bw - 3, by + bh * 0.25, 9, 7, 3);
     ctx.fill();
 
-    // belly highlight
-    ctx.fillStyle = COL.beaverLight;
+    // ── ears (rounded squares on top) ─────────────────────────────────────
+    // left ear
+    ctx.fillStyle = C.ear;
     ctx.beginPath();
-    ctx.ellipse(bodyX + bodyW * 0.55, bodyY + bodyH * 0.55, bodyW * 0.25, bodyH * 0.28, 0, 0, Math.PI * 2);
+    ctx.roundRect(bx + 5, by - 20, 12, 16, [6, 6, 2, 2]);
+    ctx.fill();
+    ctx.fillStyle = C.earInner;
+    ctx.beginPath();
+    ctx.roundRect(bx + 8, by - 17, 6, 10, [4, 4, 2, 2]);
     ctx.fill();
 
-    // ── arms ─────────────────────────────────────────────────────────────
-    if (!duck) {
-      ctx.fillStyle = COL.beaverDark;
-      ctx.beginPath();
-      ctx.roundRect(bodyX + bodyW - 6, bodyY + 10, 8, 6, 3);
-      ctx.fill();
-    }
-
-    // ── head ─────────────────────────────────────────────────────────────
-    const headR = duck ? 14 : 15;
-    const headX = duck ? bodyX + bodyW - 6 : bodyX + bodyW + 2;
-    const headY = duck ? bodyY + 4 : bodyY - 8;
-
-    ctx.fillStyle = COL.beaver;
+    // right ear
+    ctx.fillStyle = C.ear;
     ctx.beginPath();
-    ctx.arc(headX, headY, headR, 0, Math.PI * 2);
+    ctx.roundRect(bx + bw - 18, by - 20, 12, 16, [6, 6, 2, 2]);
+    ctx.fill();
+    ctx.fillStyle = C.earInner;
+    ctx.beginPath();
+    ctx.roundRect(bx + bw - 15, by - 17, 6, 10, [4, 4, 2, 2]);
     ctx.fill();
 
-    // cheek pouches
-    ctx.fillStyle = COL.beaverLight;
+    // ── eyes ─────────────────────────────────────────────────────────────
+    // eye whites
+    ctx.fillStyle = '#f0e0cc';
     ctx.beginPath();
-    ctx.ellipse(headX + 6, headY + 4, 7, 6, 0.3, 0, Math.PI * 2);
+    ctx.ellipse(bx + bw * 0.72, by + bh * 0.28, 7, 7, 0, 0, Math.PI * 2);
     ctx.fill();
-
-    // ── ears ─────────────────────────────────────────────────────────────
-    ctx.fillStyle = COL.beaverDark;
+    // pupils
+    ctx.fillStyle = C.eye;
     ctx.beginPath();
-    ctx.ellipse(headX - 7, headY - headR + 4, 5, 7, -0.3, 0, Math.PI * 2);
+    ctx.arc(bx + bw * 0.72 + 1, by + bh * 0.28, 4.5, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = COL.beaverLight;
+    // shine
+    ctx.fillStyle = C.eyeShine;
     ctx.beginPath();
-    ctx.ellipse(headX - 7, headY - headR + 4, 3, 5, -0.3, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = COL.beaverDark;
-    ctx.beginPath();
-    ctx.ellipse(headX + 5, headY - headR + 2, 5, 7, 0.3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = COL.beaverLight;
-    ctx.beginPath();
-    ctx.ellipse(headX + 5, headY - headR + 2, 3, 5, 0.3, 0, Math.PI * 2);
-    ctx.fill();
-
-    // ── eye ──────────────────────────────────────────────────────────────
-    ctx.fillStyle = COL.eye;
-    ctx.beginPath();
-    ctx.arc(headX + 5, headY - 2, 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = COL.eyeShine;
-    ctx.beginPath();
-    ctx.arc(headX + 6.5, headY - 3, 1.5, 0, Math.PI * 2);
+    ctx.arc(bx + bw * 0.72 + 2, by + bh * 0.28 - 2, 1.8, 0, Math.PI * 2);
     ctx.fill();
 
     // ── nose ─────────────────────────────────────────────────────────────
-    ctx.fillStyle = '#2a0a00';
+    ctx.fillStyle = '#1a0500';
     ctx.beginPath();
-    ctx.ellipse(headX + 11, headY + 3, 4, 3, 0.1, 0, Math.PI * 2);
+    ctx.ellipse(bx + bw * 0.82, by + bh * 0.45, 5, 4, 0.1, 0, Math.PI * 2);
+    ctx.fill();
+    // nostrils
+    ctx.fillStyle = '#0a0200';
+    ctx.beginPath();
+    ctx.ellipse(bx + bw * 0.79, by + bh * 0.44, 1.5, 1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(bx + bw * 0.86, by + bh * 0.44, 1.5, 1, 0, 0, Math.PI * 2);
     ctx.fill();
 
     // ── buck teeth ───────────────────────────────────────────────────────
-    ctx.fillStyle = COL.tooth;
+    ctx.fillStyle = C.tooth;
     ctx.beginPath();
-    ctx.roundRect(headX + 7, headY + 6, 5, 6, [0, 0, 2, 2]);
+    ctx.roundRect(bx + bw * 0.72, by + bh * 0.55, 7, 9, [0, 0, 3, 3]);
     ctx.fill();
     ctx.beginPath();
-    ctx.roundRect(headX + 13, headY + 6, 5, 6, [0, 0, 2, 2]);
+    ctx.roundRect(bx + bw * 0.81, by + bh * 0.55, 7, 9, [0, 0, 3, 3]);
     ctx.fill();
-    ctx.strokeStyle = '#ccc';
-    ctx.lineWidth = 0.5;
+    // tooth divider
+    ctx.strokeStyle = C.toothLine;
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(headX + 12, headY + 6);
-    ctx.lineTo(headX + 12, headY + 12);
+    ctx.moveTo(bx + bw * 0.795, by + bh * 0.55);
+    ctx.lineTo(bx + bw * 0.795, by + bh * 0.55 + 9);
     ctx.stroke();
+    // tooth shading
+    ctx.fillStyle = 'rgba(200,190,80,0.3)';
+    ctx.beginPath();
+    ctx.roundRect(bx + bw * 0.72 + 1, by + bh * 0.56, 3, 7, [0, 0, 1, 1]);
+    ctx.fill();
+
+    // ── whiskers ────────────────────────────────────────────────────────
+    ctx.strokeStyle = 'rgba(230,200,160,0.8)';
+    ctx.lineWidth = 0.9;
+    const wx = bx + bw * 0.76;
+    const wy = by + bh * 0.48;
+    [[-12, -3], [-14, 0], [-12, 3]].forEach(([dx, dy]) => {
+      ctx.beginPath();
+      ctx.moveTo(wx, wy); ctx.lineTo(wx + dx, wy + dy);
+      ctx.stroke();
+    });
+    [[12, -3], [14, 0], [12, 3]].forEach(([dx, dy]) => {
+      ctx.beginPath();
+      ctx.moveTo(wx + 14, wy); ctx.lineTo(wx + 14 + dx, wy + dy);
+      ctx.stroke();
+    });
 
     ctx.restore();
   }
 
   // ── collision ─────────────────────────────────────────────────────────────
   function hitboxOf(m) {
-    const duck = m.ducking;
-    const w = duck ? 44 : 36;
-    const h = duck ? 22 : 38;
-    return { x: m.x - 4, y: m.y - h + 4, w: w - 8, h: h - 6 };
+    const S = 38;
+    const sq = m.squash;
+    const bw = Math.round(S / sq);
+    const bh = Math.round(S * sq);
+    return { x: m.x - bw / 2 + 4, y: m.y - bh + 4, w: bw - 8, h: bh - 5 };
   }
 
   function overlaps(a, b) {
@@ -408,73 +649,85 @@
            a.y < b.y + b.h && a.y + a.h > b.y;
   }
 
-  // ── overlay screens ───────────────────────────────────────────────────────
-  function drawOverlay(msg, sub) {
-    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  // ── HUD & overlays ─────────────────────────────────────────────────────────
+  function drawOverlay(title, sub) {
+    ctx.fillStyle = 'rgba(5,2,0,0.55)';
     ctx.fillRect(0, 0, W, H);
 
-    ctx.fillStyle = '#f5deb3';
-    ctx.textAlign = 'center';
-    ctx.font = 'bold 36px Courier New';
-    ctx.fillText(msg, W / 2, H / 2 - 16);
-
-    ctx.font = '16px Courier New';
+    // title box
     ctx.fillStyle = '#c8860a';
-    ctx.fillText(sub, W / 2, H / 2 + 16);
+    ctx.beginPath();
+    ctx.roundRect(W / 2 - 220, H / 2 - 52, 440, 60, 8);
+    ctx.fill();
+    ctx.fillStyle = '#0d0500';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 34px Courier New';
+    ctx.fillText(title, W / 2, H / 2 - 14);
+
+    ctx.font = '15px Courier New';
+    ctx.fillStyle = '#f5deb3';
+    ctx.fillText(sub, W / 2, H / 2 + 22);
     ctx.textAlign = 'left';
   }
 
-  // ── main loop ─────────────────────────────────────────────────────────────
+  // ── main update ────────────────────────────────────────────────────────────
   function update() {
     if (state !== 'running') return;
 
     frame++;
     score++;
-    speedMult = 1 + Math.floor(score / 600) * 0.15;
+    speedMult = 1 + Math.floor(score / 500) * 0.18;
     const spd = BASE_SPEED * speedMult;
 
-    // move background
-    bgX += spd;
+    bgX  += spd;
+    mtX  += spd * 0.15;
+    cloudX += spd * 0.1;
 
-    // clouds
+    // scroll trees
+    trees.forEach(t => {
+      t.x -= spd * 0.7;
+      if (t.x < -60) { t.x = W + 60; t.h = 50 + Math.floor(Math.random() * 40); }
+    });
+
+    // scroll clouds
     clouds.forEach(c => {
       c.x -= c.speed * speedMult;
       if (c.x + c.w < 0) c.x = W + c.w;
     });
 
-    // manna physics
-    manna.ducking = !!(keys['ArrowDown'] || keys['KeyS']);
+    // physics
     if (!manna.onGround) {
       manna.vy += GRAVITY;
-      manna.y += manna.vy;
+      manna.y  += manna.vy;
     }
     if (manna.y >= GROUND_Y) {
       manna.y = GROUND_Y;
       manna.vy = 0;
+      if (!manna.onGround) spawnDust(manna.x + 10, GROUND_Y + 14, 5);
       manna.onGround = true;
     }
 
-    // animation
-    if (manna.onGround && !manna.ducking) {
-      manna.legPhase += 0.22 * speedMult;
-    }
-    manna.tailWag = Math.sin(frame * 0.12) * 3;
+    // squash/stretch easing
+    const targetSquash = manna.onGround ? 1 : (manna.vy < 0 ? 1.25 : 0.88);
+    manna.squash += (targetSquash - manna.squash) * 0.18;
 
-    // spawn obstacles
+    // animation
+    if (manna.onGround) manna.legPhase += 0.25 * speedMult;
+    manna.tailWag = Math.sin(frame * 0.13) * 4;
+    manna.bobble  = manna.onGround ? Math.sin(manna.legPhase * 2) * 1.5 : 0;
+    manna.y += manna.bobble * 0.4;
+
     maybeSpawnObstacle();
 
-    // update obstacles
+    // obstacles
     for (let i = obstacles.length - 1; i >= 0; i--) {
       const o = obstacles[i];
       o.x -= spd;
-      if (o.x + o.w < -20) { obstacles.splice(i, 1); continue; }
-
-      // collision
-      const mb = hitboxOf(manna);
-      if (overlaps(mb, o)) {
+      if (o.x + o.w < -30) { obstacles.splice(i, 1); continue; }
+      if (overlaps(hitboxOf(manna), o)) {
         state = 'dead';
         if (score > best) best = score;
-        spawnParticles(manna.x + 20, manna.y - 10, 16, COL.beaver);
+        spawnExplosion(manna.x + 10, manna.y - 20);
         document.getElementById('best').textContent = Math.floor(best / 6);
       }
     }
@@ -482,62 +735,66 @@
     // particles
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i];
-      p.x += p.vx; p.y += p.vy; p.vy += 0.15;
+      p.x += p.vx; p.y += p.vy; p.vy += 0.18;
       p.life -= p.decay;
       if (p.life <= 0) particles.splice(i, 1);
     }
 
-    // update UI
     document.getElementById('score').textContent = Math.floor(score / 6);
     document.getElementById('speed').textContent = speedMult.toFixed(1);
   }
 
+  // ── main draw ──────────────────────────────────────────────────────────────
   function draw() {
     ctx.clearRect(0, 0, W, H);
+
     drawSky();
+    drawMountains();
+
+    // trees (behind obstacles)
+    trees.forEach(t => drawTree(t.x, t.h));
+
     clouds.forEach(drawCloud);
     drawGround();
 
-    // distance markers
-    ctx.fillStyle = 'rgba(100,60,20,0.5)';
-    ctx.font = '11px Courier New';
-    const dist = Math.floor(score / 6);
-    if (dist > 0 && dist % 50 === 0 && frame % 60 < 30) {
-      ctx.fillText(`${dist}m`, W / 2, 30);
-    }
-
     // obstacles
-    obstacles.forEach(o => {
-      if (o.type === 'log') drawLog(o);
-      else drawRock(o);
-    });
+    obstacles.forEach(o => o.type === 'log' ? drawLog(o) : drawRock(o));
 
-    // particles
+    // particles (behind beaver)
     particles.forEach(p => {
-      ctx.globalAlpha = p.life;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, p.life);
       ctx.fillStyle = p.color;
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
     });
-    ctx.globalAlpha = 1;
 
-    // manna
     drawBeaver(manna);
 
+    // speed lines when fast
+    if (speedMult > 1.5) {
+      ctx.strokeStyle = `rgba(255,200,100,${(speedMult - 1.5) * 0.15})`;
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 6; i++) {
+        const lx = ((i * 145 - bgX * 1.2) % (W + 60) + W + 60) % (W + 60) - 30;
+        const ly = 40 + i * 38;
+        ctx.beginPath();
+        ctx.moveTo(lx, ly);
+        ctx.lineTo(lx - 35, ly);
+        ctx.stroke();
+      }
+    }
+
     if (state === 'idle') {
-      drawOverlay('MANNA THE BEAVER', 'Press SPACE or tap to start!');
+      drawOverlay('MANNA THE BEAVER', 'Tap or press SPACE to start!');
     } else if (state === 'dead') {
-      drawOverlay('SPLAT!', `Score: ${Math.floor(score/6)}m  —  Press SPACE to retry`);
+      drawOverlay('SPLAT!', `Score: ${Math.floor(score/6)}m  —  Tap or SPACE to retry`);
     }
   }
 
-  function loop() {
-    update();
-    draw();
-    requestAnimationFrame(loop);
-  }
-
+  function loop() { update(); draw(); requestAnimationFrame(loop); }
   init();
   loop();
   </script>
