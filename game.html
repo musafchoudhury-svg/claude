@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Block Game</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1a1a2e; color: #eee; font-family: monospace; user-select: none; overflow: hidden; }
+
+  #main-menu {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    gap: 20px;
+  }
+  #main-menu h1 { font-size: 48px; color: #e94560; text-shadow: 0 0 20px #e94560; }
+
+  .menu-btn {
+    padding: 14px 40px;
+    font-size: 20px;
+    font-family: monospace;
+    background: #16213e;
+    color: #eee;
+    border: 2px solid #e94560;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s;
+    min-width: 220px;
+    text-align: center;
+  }
+  .menu-btn:hover { background: #e94560; color: #fff; box-shadow: 0 0 15px #e94560; }
+
+  #editor-screen, #play-screen { display: none; flex-direction: column; height: 100vh; }
+
+  /* EDITOR */
+  #editor-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: #16213e;
+    border-bottom: 2px solid #e94560;
+    flex-wrap: wrap;
+  }
+  #editor-toolbar span { color: #e94560; font-weight: bold; font-size: 14px; margin-right: 4px; }
+
+  .tool-btn {
+    padding: 6px 14px;
+    font-size: 13px;
+    font-family: monospace;
+    background: #0f3460;
+    color: #eee;
+    border: 2px solid #444;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.15s;
+  }
+  .tool-btn:hover { border-color: #e94560; }
+  .tool-btn.active { background: #e94560; border-color: #e94560; color: #fff; }
+
+  #editor-canvas-wrap {
+    flex: 1;
+    overflow: auto;
+    background: #0a0a1a;
+    position: relative;
+  }
+  #editor-canvas { display: block; cursor: crosshair; }
+
+  /* PLAY */
+  #play-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    background: #16213e;
+    border-bottom: 2px solid #4ade80;
+  }
+  #play-toolbar span { color: #4ade80; font-weight: bold; }
+  #play-canvas { display: block; background: #0a0a1a; }
+  #play-msg {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 32px;
+    font-weight: bold;
+    pointer-events: none;
+    display: none;
+  }
+  #play-wrap { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; }
+</style>
+</head>
+<body>
+
+<!-- MAIN MENU -->
+<div id="main-menu">
+  <h1>BLOCK GAME</h1>
+  <button class="menu-btn" onclick="openEditor()">Editor</button>
+  <button class="menu-btn" id="menu-play-btn" onclick="startPlay(null)" style="opacity:0.5; cursor:default" disabled>Play (no level)</button>
+</div>
+
+<!-- EDITOR SCREEN -->
+<div id="editor-screen">
+  <div id="editor-toolbar">
+    <span>EDITOR</span>
+
+    <div style="display:flex;gap:4px;align-items:center;background:#0f3460;padding:4px 8px;border-radius:3px;border:1px solid #555">
+      <span style="color:#aaa;font-size:12px;margin:0">Tool:</span>
+      <button class="tool-btn active" id="tool-block" onclick="setTool('block')">Block</button>
+      <button class="tool-btn" id="tool-spike" onclick="setTool('spike')">Spike</button>
+      <button class="tool-btn" id="tool-erase" onclick="setTool('erase')">Erase</button>
+      <button class="tool-btn" id="tool-select" onclick="setTool('select')">Select</button>
+    </div>
+
+    <div style="display:flex;gap:4px;align-items:center;background:#0f3460;padding:4px 8px;border-radius:3px;border:1px solid #555">
+      <span style="color:#aaa;font-size:12px;margin:0">Edit:</span>
+      <button class="tool-btn" id="btn-swipe" onclick="toggleSwipe()" title="Toggle swipe multi-select">Swipe: OFF</button>
+      <button class="tool-btn" onclick="copySelected()">Copy</button>
+      <button class="tool-btn" onclick="pasteCopied()">Paste</button>
+      <button class="tool-btn" onclick="deselect()">Deselect</button>
+      <button class="tool-btn" onclick="deleteSelected()">Delete</button>
+    </div>
+
+    <div style="flex:1"></div>
+    <button class="tool-btn" style="background:#4ade80;color:#000;border-color:#4ade80" onclick="startPlay('editor')">▶ Playtest</button>
+    <button class="tool-btn" onclick="closeEditor()">✕ Menu</button>
+  </div>
+  <div id="editor-canvas-wrap">
+    <canvas id="editor-canvas"></canvas>
+  </div>
+</div>
+
+<!-- PLAY SCREEN -->
+<div id="play-screen">
+  <div id="play-toolbar">
+    <span>PLAYING</span>
+    <button class="tool-btn" id="play-restart-btn" onclick="restartPlay()">Restart</button>
+    <button class="tool-btn" id="play-edit-btn" onclick="backToEditor()">Back to Editor</button>
+    <span id="play-status" style="margin-left:auto;font-size:14px"></span>
+  </div>
+  <div id="play-wrap">
+    <canvas id="play-canvas"></canvas>
+    <div id="play-msg"></div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// CONSTANTS
+// ============================================================
+const CELL = 40;          // grid cell size px
+const COLS = 60;          // editor columns
+const ROWS = 20;          // editor rows
+
+const PLAY_W = window.innerWidth;
+const PLAY_H = window.innerHeight - 50;
+
+const GRAVITY = 0.55;
+const JUMP_VEL = -12.5;   // jump height ~2 blocks
+const PLAYER_SPEED = 4.5;
+const PLAYER_SIZE = CELL - 4;
+
+// ============================================================
+// STATE
+// ============================================================
+let currentTool = 'block';
+let swipeMode = false;
+let cells = {};          // key "col,row" -> 'block' | 'spike'
+let selected = new Set();
+let clipboard = [];      // [{dc,dr,type}]
+
+let mouseDown = false;
+let mouseStart = null;   // {x,y} canvas coords
+let swipeRect = null;    // {c0,r0,c1,r1}
+let dragOffset = null;   // {dc,dr} for dragging selected
+let isDragging = false;
+let lastCellHover = null;
+
+let editorCanvas, editorCtx, editorWrap;
+let playCanvas, playCtx;
+
+// play state
+let player = null;
+let playLevel = null;
+let animId = null;
+let gameOver = false;
+let gameWon = false;
+let cameraX = 0;
+let fromEditor = false;
+
+// ============================================================
+// SCREEN MANAGEMENT
+// ============================================================
+function showScreen(id) {
+  document.getElementById('main-menu').style.display = 'none';
+  document.getElementById('editor-screen').style.display = 'none';
+  document.getElementById('play-screen').style.display = 'none';
+  if (id === 'menu') document.getElementById('main-menu').style.display = 'flex';
+  else {
+    document.getElementById(id + '-screen').style.display = 'flex';
+  }
+}
+
+function openEditor() {
+  showScreen('editor');
+  initEditor();
+}
+
+function closeEditor() {
+  showScreen('menu');
+  if (animId) { cancelAnimationFrame(animId); animId = null; }
+}
+
+// ============================================================
+// EDITOR INIT
+// ============================================================
+function initEditor() {
+  editorCanvas = document.getElementById('editor-canvas');
+  editorCtx = editorCanvas.getContext('2d');
+  editorWrap = document.getElementById('editor-canvas-wrap');
+
+  editorCanvas.width = COLS * CELL;
+  editorCanvas.height = ROWS * CELL;
+
+  editorCanvas.onmousedown = editorMouseDown;
+  editorCanvas.onmousemove = editorMouseMove;
+  editorCanvas.onmouseup = editorMouseUp;
+  editorCanvas.onmouseleave = editorMouseLeave;
+  editorCanvas.oncontextmenu = e => e.preventDefault();
+
+  drawEditor();
+}
+
+// ============================================================
+// EDITOR TOOLS
+// ============================================================
+function setTool(t) {
+  currentTool = t;
+  ['block','spike','erase','select'].forEach(x => {
+    document.getElementById('tool-' + x).classList.toggle('active', x === t);
+  });
+  editorCanvas.style.cursor = t === 'select' ? 'default' : 'crosshair';
+}
+
+function toggleSwipe() {
+  swipeMode = !swipeMode;
+  document.getElementById('btn-swipe').textContent = 'Swipe: ' + (swipeMode ? 'ON' : 'OFF');
+  document.getElementById('btn-swipe').classList.toggle('active', swipeMode);
+}
+
+function deselect() {
+  selected.clear();
+  swipeRect = null;
+  dragOffset = null;
+  isDragging = false;
+  drawEditor();
+}
+
+function deleteSelected() {
+  selected.forEach(k => delete cells[k]);
+  selected.clear();
+  drawEditor();
+}
+
+function copySelected() {
+  if (!selected.size) return;
+  let minC = Infinity, minR = Infinity;
+  selected.forEach(k => {
+    const [c,r] = k.split(',').map(Number);
+    if (c < minC) minC = c;
+    if (r < minR) minR = r;
+  });
+  clipboard = [];
+  selected.forEach(k => {
+    const [c,r] = k.split(',').map(Number);
+    clipboard.push({dc: c - minC, dr: r - minR, type: cells[k]});
+  });
+}
+
+function pasteCopied() {
+  if (!clipboard.length) return;
+  deselect();
+  // Paste at center of view
+  const wrap = document.getElementById('editor-canvas-wrap');
+  const viewC = Math.floor((wrap.scrollLeft + wrap.clientWidth/2) / CELL);
+  const viewR = Math.floor((wrap.scrollTop + wrap.clientHeight/2) / CELL);
+  clipboard.forEach(({dc, dr, type}) => {
+    const c = viewC + dc, r = viewR + dr;
+    if (c >= 0 && c < COLS && r >= 0 && r < ROWS) {
+      const k = `${c},${r}`;
+      cells[k] = type;
+      selected.add(k);
+    }
+  });
+  drawEditor();
+}
+
+// ============================================================
+// EDITOR MOUSE
+// ============================================================
+function cellAt(x, y) {
+  return { c: Math.floor(x / CELL), r: Math.floor(y / CELL) };
+}
+
+function editorMouseDown(e) {
+  e.preventDefault();
+  mouseDown = true;
+  isDragging = false;
+  const rect = editorCanvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  mouseStart = {x, y};
+  const {c, r} = cellAt(x, y);
+  const k = `${c},${r}`;
+
+  if (swipeMode) {
+    // Start swipe selection rect
+    swipeRect = {c0: c, r0: r, c1: c, r1: r};
+    return;
+  }
+
+  if (currentTool === 'select') {
+    if (selected.has(k)) {
+      // Start drag
+      dragOffset = {dc: 0, dr: 0};
+      isDragging = true;
+    } else {
+      // Select single cell
+      deselect();
+      if (cells[k]) {
+        selected.add(k);
+      }
+    }
+    drawEditor();
+    return;
+  }
+
+  // Place / erase
+  placeCell(c, r);
+  lastCellHover = k;
+  drawEditor();
+}
+
+function editorMouseMove(e) {
+  if (!mouseDown) return;
+  const rect = editorCanvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const {c, r} = cellAt(x, y);
+
+  if (swipeMode && swipeRect) {
+    swipeRect.c1 = c;
+    swipeRect.r1 = r;
+    // Update selection
+    selected.clear();
+    const c0 = Math.min(swipeRect.c0, swipeRect.c1);
+    const c1 = Math.max(swipeRect.c0, swipeRect.c1);
+    const r0 = Math.min(swipeRect.r0, swipeRect.r1);
+    const r1 = Math.max(swipeRect.r0, swipeRect.r1);
+    for (let cc = c0; cc <= c1; cc++) {
+      for (let rr = r0; rr <= r1; rr++) {
+        const k = `${cc},${rr}`;
+        if (cells[k]) selected.add(k);
+      }
+    }
+    drawEditor();
+    return;
+  }
+
+  if (currentTool === 'select' && isDragging && selected.size) {
+    const dx = Math.floor((x - mouseStart.x) / CELL);
+    const dy = Math.floor((y - mouseStart.y) / CELL);
+    dragOffset = {dc: dx, dr: dy};
+    drawEditor();
+    return;
+  }
+
+  const k = `${c},${r}`;
+  if (k !== lastCellHover && currentTool !== 'select') {
+    placeCell(c, r);
+    lastCellHover = k;
+    drawEditor();
+  }
+}
+
+function editorMouseUp(e) {
+  if (!mouseDown) return;
+  mouseDown = false;
+  const rect = editorCanvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+
+  if (swipeMode && swipeRect) {
+    swipeRect = null;
+    drawEditor();
+    return;
+  }
+
+  if (currentTool === 'select' && isDragging && dragOffset) {
+    // Commit drag
+    const moved = {};
+    selected.forEach(k => {
+      const [c,r] = k.split(',').map(Number);
+      const nc = c + dragOffset.dc;
+      const nr = r + dragOffset.dr;
+      if (nc >= 0 && nc < COLS && nr >= 0 && nr < ROWS) {
+        moved[`${nc},${nr}`] = cells[k];
+      }
+    });
+    selected.forEach(k => delete cells[k]);
+    selected.clear();
+    Object.entries(moved).forEach(([k,v]) => { cells[k] = v; selected.add(k); });
+    dragOffset = null;
+    isDragging = false;
+    drawEditor();
+  }
+}
+
+function editorMouseLeave() {
+  if (mouseDown) editorMouseUp({});
+}
+
+function placeCell(c, r) {
+  if (c < 0 || c >= COLS || r < 0 || r >= ROWS) return;
+  const k = `${c},${r}`;
+  if (currentTool === 'erase') {
+    delete cells[k];
+  } else if (currentTool !== 'select') {
+    cells[k] = currentTool;
+  }
+}
+
+// ============================================================
+// EDITOR DRAW
+// ============================================================
+function drawEditor() {
+  if (!editorCtx) return;
+  const ctx = editorCtx;
+  const W = editorCanvas.width, H = editorCanvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  // Background
+  ctx.fillStyle = '#0d0d22';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid
+  ctx.strokeStyle = '#1e1e3a';
+  ctx.lineWidth = 1;
+  for (let c = 0; c <= COLS; c++) {
+    ctx.beginPath(); ctx.moveTo(c * CELL, 0); ctx.lineTo(c * CELL, H); ctx.stroke();
+  }
+  for (let r = 0; r <= ROWS; r++) {
+    ctx.beginPath(); ctx.moveTo(0, r * CELL); ctx.lineTo(W, r * CELL); ctx.stroke();
+  }
+
+  // Drag preview
+  const dragPreview = {};
+  if (isDragging && dragOffset && selected.size) {
+    selected.forEach(k => {
+      const [c,r] = k.split(',').map(Number);
+      const nc = c + dragOffset.dc, nr = r + dragOffset.dr;
+      dragPreview[`${nc},${nr}`] = cells[k];
+    });
+  }
+
+  // Cells
+  Object.entries(cells).forEach(([k, type]) => {
+    if (isDragging && selected.has(k)) return; // hide originals while dragging
+    const [c,r] = k.split(',').map(Number);
+    drawCellAt(ctx, c, r, type, selected.has(k));
+  });
+
+  // Drag preview cells
+  Object.entries(dragPreview).forEach(([k, type]) => {
+    const [c,r] = k.split(',').map(Number);
+    ctx.globalAlpha = 0.6;
+    drawCellAt(ctx, c, r, type, true);
+    ctx.globalAlpha = 1;
+  });
+
+  // Swipe rect
+  if (swipeRect) {
+    const c0 = Math.min(swipeRect.c0, swipeRect.c1);
+    const c1 = Math.max(swipeRect.c0, swipeRect.c1);
+    const r0 = Math.min(swipeRect.r0, swipeRect.r1);
+    const r1 = Math.max(swipeRect.r0, swipeRect.r1);
+    ctx.strokeStyle = '#60a5fa';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeRect(c0*CELL, r0*CELL, (c1-c0+1)*CELL, (r1-r0+1)*CELL);
+    ctx.fillStyle = 'rgba(96,165,250,0.1)';
+    ctx.fillRect(c0*CELL, r0*CELL, (c1-c0+1)*CELL, (r1-r0+1)*CELL);
+    ctx.setLineDash([]);
+  }
+
+  // Player start indicator (column 1, bottom)
+  ctx.strokeStyle = '#4ade80';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([3,3]);
+  ctx.strokeRect(1*CELL+2, (ROWS-2)*CELL+2, PLAYER_SIZE, PLAYER_SIZE);
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#4ade80';
+  ctx.font = '10px monospace';
+  ctx.fillText('START', 1*CELL+4, (ROWS-2)*CELL+14);
+}
+
+function drawCellAt(ctx, c, r, type, isSelected) {
+  const x = c * CELL, y = r * CELL;
+  if (type === 'block') {
+    ctx.fillStyle = isSelected ? '#93c5fd' : '#3b82f6';
+    ctx.fillRect(x+1, y+1, CELL-2, CELL-2);
+    // highlight
+    ctx.fillStyle = isSelected ? '#bfdbfe' : '#60a5fa';
+    ctx.fillRect(x+2, y+2, CELL-4, 4);
+    ctx.fillRect(x+2, y+2, 4, CELL-4);
+    // shadow
+    ctx.fillStyle = isSelected ? '#1d4ed8' : '#1e40af';
+    ctx.fillRect(x+1, y+CELL-5, CELL-2, 4);
+  } else if (type === 'spike') {
+    // Draw spike triangle
+    ctx.fillStyle = isSelected ? '#fca5a5' : '#ef4444';
+    ctx.beginPath();
+    ctx.moveTo(x + CELL/2, y + 4);
+    ctx.lineTo(x + CELL - 4, y + CELL - 4);
+    ctx.lineTo(x + 4, y + CELL - 4);
+    ctx.closePath();
+    ctx.fill();
+    if (isSelected) {
+      ctx.strokeStyle = '#f87171';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+  }
+}
+
+// ============================================================
+// PLAY MODE
+// ============================================================
+function startPlay(from) {
+  fromEditor = (from === 'editor');
+  playLevel = JSON.parse(JSON.stringify(cells));
+  showScreen('play');
+  document.getElementById('play-edit-btn').style.display = fromEditor ? 'inline-block' : 'none';
+  initPlay();
+}
+
+function backToEditor() {
+  if (animId) { cancelAnimationFrame(animId); animId = null; }
+  showScreen('editor');
+  drawEditor();
+}
+
+function restartPlay() {
+  if (animId) { cancelAnimationFrame(animId); animId = null; }
+  initPlay();
+}
+
+function initPlay() {
+  playCanvas = document.getElementById('play-canvas');
+  playCtx = playCanvas.getContext('2d');
+
+  // Size canvas to fill play-wrap
+  const wrap = document.getElementById('play-wrap');
+  playCanvas.width = wrap.clientWidth || PLAY_W;
+  playCanvas.height = wrap.clientHeight || (window.innerHeight - 50);
+
+  // Player starts at column 1, sitting on floor
+  const floorY = ROWS * CELL;
+  player = {
+    x: 1 * CELL + 2,
+    y: (ROWS - 2) * CELL,
+    vx: PLAYER_SPEED,
+    vy: 0,
+    w: PLAYER_SIZE,
+    h: PLAYER_SIZE,
+    onGround: false,
+    dead: false
+  };
+  cameraX = 0;
+  gameOver = false;
+  gameWon = false;
+
+  const msg = document.getElementById('play-msg');
+  msg.style.display = 'none';
+  document.getElementById('play-status').textContent = '';
+
+  // Input
+  document.onkeydown = handlePlayKey;
+  playCanvas.onclick = handlePlayClick;
+
+  if (animId) cancelAnimationFrame(animId);
+  animId = requestAnimationFrame(playLoop);
+}
+
+function handlePlayKey(e) {
+  if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') {
+    e.preventDefault();
+    tryJump();
+  }
+}
+
+function handlePlayClick() {
+  tryJump();
+}
+
+function tryJump() {
+  if (gameOver || gameWon) { restartPlay(); return; }
+  if (player && player.onGround) {
+    player.vy = JUMP_VEL;
+    player.onGround = false;
+  }
+}
+
+function playLoop() {
+  updatePlay();
+  drawPlay();
+  if (!gameOver && !gameWon) {
+    animId = requestAnimationFrame(playLoop);
+  }
+}
+
+function updatePlay() {
+  if (gameOver || gameWon || !player) return;
+
+  player.vy += GRAVITY;
+  player.x += player.vx;
+  player.y += player.vy;
+
+  // Check ground (bottom of level = ROWS * CELL)
+  const floorY = ROWS * CELL - player.h;
+  player.onGround = false;
+
+  // Collision with cells
+  const cStart = Math.floor(player.x / CELL) - 1;
+  const cEnd = Math.ceil((player.x + player.w) / CELL) + 1;
+  const rStart = Math.floor(player.y / CELL) - 1;
+  const rEnd = Math.ceil((player.y + player.h) / CELL) + 1;
+
+  for (let c = cStart; c <= cEnd; c++) {
+    for (let r = rStart; r <= rEnd; r++) {
+      const k = `${c},${r}`;
+      const type = playLevel[k];
+      if (!type) continue;
+
+      const bx = c * CELL, by = r * CELL;
+      if (type === 'spike') {
+        // Check triangle collision (simplified: bounding box + center hit)
+        if (rectsOverlap(player.x+4, player.y+4, player.w-8, player.h-8, bx+4, by+4, CELL-8, CELL-8)) {
+          playerDie();
+          return;
+        }
+      } else if (type === 'block') {
+        if (rectsOverlap(player.x, player.y, player.w, player.h, bx, by, CELL, CELL)) {
+          resolveBlockCollision(bx, by, CELL, CELL);
+        }
+      }
+    }
+  }
+
+  // Floor collision
+  if (player.y >= floorY) {
+    player.y = floorY;
+    player.vy = 0;
+    player.onGround = true;
+  }
+
+  // Ceiling
+  if (player.y < 0) {
+    player.y = 0;
+    player.vy = 0;
+  }
+
+  // Win condition: reached end of level
+  if (player.x > COLS * CELL - CELL * 2) {
+    gameWon = true;
+    showMsg('YOU WIN! 🎉', '#4ade80');
+    return;
+  }
+
+  // Camera follows player with some lead
+  cameraX = player.x - playCanvas.width * 0.3;
+  if (cameraX < 0) cameraX = 0;
+}
+
+function resolveBlockCollision(bx, by, bw, bh) {
+  if (!player) return;
+  const px = player.x, py = player.y, pw = player.w, ph = player.h;
+
+  const overlapL = (px + pw) - bx;
+  const overlapR = (bx + bw) - px;
+  const overlapT = (py + ph) - by;
+  const overlapB = (by + bh) - py;
+
+  const minOverlap = Math.min(overlapL, overlapR, overlapT, overlapB);
+
+  if (minOverlap === overlapT && player.vy >= 0) {
+    player.y = by - ph;
+    player.vy = 0;
+    player.onGround = true;
+  } else if (minOverlap === overlapB && player.vy < 0) {
+    player.y = by + bh;
+    player.vy = 0;
+  } else if (minOverlap === overlapL) {
+    playerDie(); // ran into a wall = death
+  } else if (minOverlap === overlapR) {
+    player.x = bx + bw;
+  }
+}
+
+function rectsOverlap(ax,ay,aw,ah, bx,by,bw,bh) {
+  return ax < bx+bw && ax+aw > bx && ay < by+bh && ay+ah > by;
+}
+
+function playerDie() {
+  if (gameOver) return;
+  gameOver = true;
+  player.dead = true;
+  showMsg('YOU DIED  — Click or Space to restart', '#ef4444');
+}
+
+function showMsg(text, color) {
+  const msg = document.getElementById('play-msg');
+  msg.textContent = text;
+  msg.style.color = color;
+  msg.style.display = 'block';
+  msg.style.textShadow = `0 0 20px ${color}`;
+}
+
+// ============================================================
+// PLAY DRAW
+// ============================================================
+function drawPlay() {
+  const ctx = playCtx;
+  const W = playCanvas.width, H = playCanvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  // Sky gradient
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#0a0a1a');
+  grad.addColorStop(1, '#1a1a2e');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Camera offset — keep level vertically centered based on row count
+  const levelH = ROWS * CELL;
+  const offsetY = H - levelH - 10;
+
+  ctx.save();
+  ctx.translate(-Math.floor(cameraX), offsetY < 0 ? offsetY : Math.max(offsetY, 0));
+
+  // Draw level cells
+  const visC0 = Math.floor(cameraX / CELL) - 1;
+  const visC1 = visC0 + Math.ceil(W / CELL) + 2;
+  for (let c = visC0; c <= visC1; c++) {
+    for (let r = 0; r < ROWS; r++) {
+      const k = `${c},${r}`;
+      const type = playLevel[k];
+      if (type) drawPlayCell(ctx, c, r, type);
+    }
+  }
+
+  // Draw floor line
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, ROWS * CELL);
+  ctx.lineTo(COLS * CELL, ROWS * CELL);
+  ctx.stroke();
+
+  // End flag
+  const flagX = (COLS - 2) * CELL;
+  ctx.fillStyle = '#fbbf24';
+  ctx.fillRect(flagX, (ROWS - 6) * CELL, 4, 6 * CELL);
+  ctx.fillStyle = '#f59e0b';
+  ctx.beginPath();
+  ctx.moveTo(flagX + 4, (ROWS - 6) * CELL);
+  ctx.lineTo(flagX + 4 + 24, (ROWS - 5) * CELL - 8);
+  ctx.lineTo(flagX + 4, (ROWS - 4) * CELL);
+  ctx.fill();
+
+  // Draw player
+  if (player) {
+    if (player.dead) {
+      ctx.globalAlpha = 0.5;
+    }
+    // Player body
+    ctx.fillStyle = '#e94560';
+    ctx.fillRect(player.x, player.y, player.w, player.h);
+    // Face
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(player.x + player.w*0.55, player.y + player.h*0.2, player.w*0.25, player.h*0.25);
+    // Eye pupil
+    ctx.fillStyle = '#000';
+    ctx.fillRect(player.x + player.w*0.65, player.y + player.h*0.28, player.w*0.1, player.h*0.12);
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.restore();
+}
+
+function drawPlayCell(ctx, c, r, type) {
+  const x = c * CELL, y = r * CELL;
+  if (type === 'block') {
+    ctx.fillStyle = '#3b82f6';
+    ctx.fillRect(x+1, y+1, CELL-2, CELL-2);
+    ctx.fillStyle = '#60a5fa';
+    ctx.fillRect(x+2, y+2, CELL-4, 4);
+    ctx.fillRect(x+2, y+2, 4, CELL-4);
+    ctx.fillStyle = '#1e40af';
+    ctx.fillRect(x+1, y+CELL-5, CELL-2, 4);
+  } else if (type === 'spike') {
+    ctx.fillStyle = '#ef4444';
+    ctx.beginPath();
+    ctx.moveTo(x + CELL/2, y + 4);
+    ctx.lineTo(x + CELL - 4, y + CELL - 4);
+    ctx.lineTo(x + 4, y + CELL - 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#fca5a5';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+}
+
+// ============================================================
+// KEYBOARD SHORTCUTS
+// ============================================================
+document.addEventListener('keydown', e => {
+  // Only in editor
+  if (document.getElementById('editor-screen').style.display !== 'flex') return;
+  if (e.ctrlKey || e.metaKey) {
+    if (e.key === 'c') { copySelected(); e.preventDefault(); }
+    if (e.key === 'v') { pasteCopied(); e.preventDefault(); }
+    if (e.key === 'd') { deselect(); e.preventDefault(); }
+  }
+  if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelected(); }
+  if (e.key === '1') setTool('block');
+  if (e.key === '2') setTool('spike');
+  if (e.key === '3') setTool('erase');
+  if (e.key === '4') setTool('select');
+});
+
+// ============================================================
+// RESIZE
+// ============================================================
+window.addEventListener('resize', () => {
+  if (document.getElementById('play-screen').style.display === 'flex' && playCanvas) {
+    const wrap = document.getElementById('play-wrap');
+    playCanvas.width = wrap.clientWidth;
+    playCanvas.height = wrap.clientHeight;
+  }
+});
+</script>
+</body>
+</html>
